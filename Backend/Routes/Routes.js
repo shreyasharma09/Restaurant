@@ -1,20 +1,62 @@
-const express =require("express")
+const express = require("express")
 const { handleResponse, handleError } = require("../Responses/Responses")
-const Users=require("../Tables/UserTable")
-const Routes=express.Router()
+const Users = require("../Tables/UserTable")
+const { generateotp ,verifyotp} = require("../Services/OtpService/OTPService")
+const { otptoemailforverification } = require("../Services/EmailService/EmailService")
+const jwt=require("jsonwebtoken")
+const Routes = express.Router()
+require("dotenv").config()
+Routes.get("/", (req, resp) => handleResponse(resp, 200, "Server Health is Okay!"))
 
-Routes.get("/",(req,resp)=>handleResponse(resp,200,"Server Health is Okay!"))
+Routes.post("/verifyUser", async (req, resp) => {
+    const { name, phone, email, password } = req.body
+    if (!name || !phone || !email || !password) return handleResponse(resp, 404, "All fields are required")
 
-Routes.post("/createUser",(req,resp)=>{
-    const {name,phone,email,password}=req.body
-    if(!name || !phone || !email || !password) return handleResponse(resp,404,"All fields are required")
-
-    const dbQuery=`Select * from ${process.env.USER_TABLE} where email='${email}'`  //find with email
-    Users.query(dbQuery,(error,results)=>{
-        if(error) return handleError(resp,error)
-        if(results.length===0) return handleResponse(resp,404,"Not Found")
-        return handleResponse(resp,202,"Okay",results)
+    const dbQuery = `Select * from ${process.env.USER_TABLE} where email='${email}'`  //find with email
+    Users.query(dbQuery, async (error, results) => { //ek se jdya obj aa skte h to ARRAY OF OBJ aayga
+        if (error) return handleError(resp, error)
+        if (results.length !== 0) return handleResponse(resp, 404, "Account related to this email is already exists")
+        const otp = generateotp(email)
+        return await otptoemailforverification(resp, email, otp)
     })
 })
 
-module.exports=Routes
+Routes.post("/createUser", async (req, resp) => {
+    const { name, phone, email, password ,otp} = req.body
+    if (!name || !phone || !email || !password) return handleResponse(resp, 404, "All fields are required")
+
+    const dbQuery = `Select * from ${process.env.USER_TABLE} where email='${email}'`  //find with email
+    Users.query(dbQuery, async (error, results) => {
+        if (error) return handleError(resp, error)
+        if (results.length !== 0) return handleResponse(resp, 404, "Account related to this email is already exists")
+        if (!otp) return handleResponse(resp, 404, "Enter the otp")
+        const result = verifyotp(email, otp)
+        if (!result.status) return handleResponse(resp, 401, result.message)
+
+        const Query = `INSERT INTO \`${process.env.USER_TABLE}\` (\`name\`, \`phone\`, \`email\`, \`password\`, \`role\`) VALUES (?, ?, ?, ?, 'owner');`;   //? m variable ki value aaygi
+        Users.query(Query, [name, phone, email, password], (error, result) => {
+            if (error) return handleError(resp, error)
+            return handleResponse(resp, 201, "Account Created Successfully", result)
+        })
+    })
+})
+
+Routes.post("/login",(req,resp)=>{
+    const {email,password}=req.body
+    if(!email || !password) return handleResponse(resp,404,"All fields are required")
+
+    const dbQuery=`Select * from ${process.env.USER_TABLE} where email='${email}'`
+    Users.query(dbQuery,(error,results)=>{  //results m array aata h 
+        if(error) return handleError(resp,error)
+        if(results.length===0) return handleResponse(resp,401,"Invalid Email")
+        if(results[0].password!==password) return handleResponse(resp,401,"Invalid Password")
+        const payload={
+            id:results[0].id
+        }
+        const token=jwt.sign(payload,process.env.JWT_KEY)
+        return handleResponse(resp,202,"Login Successfully",{token,role:results[0].role})
+    })
+})
+
+
+module.exports = Routes    
