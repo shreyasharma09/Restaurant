@@ -1,13 +1,19 @@
 const express = require("express")
+const multer =require("multer")
+const jwt = require("jsonwebtoken")
+
 const { handleResponse, handleError } = require("../Responses/Responses")
-const Users = require("../Tables/UserTable")
-const Category = require("../Tables/CategoryTable")
 const { generateotp, verifyotp } = require("../Services/OtpService/OTPService")
 const { otptoemailforverification } = require("../Services/EmailService/EmailService")
-const jwt = require("jsonwebtoken")
-const Routes = express.Router()
 const { checkUserDetails } = require("../Middlewares/CheckUserDetails")
+const Users = require("../Tables/UserTable")
+const Category = require("../Tables/CategoryTable")
+const Menu =require("../Tables/MenuTable")
+
+const Routes = express.Router()
 require("dotenv").config()
+const upload = multer()
+
 Routes.get("/", (req, resp) => handleResponse(resp, 200, "Server Health is Okay!"))
 
 Routes.post("/verifyUser", async (req, resp) => {
@@ -67,7 +73,7 @@ Routes.post('/createCategory', checkUserDetails, (req, resp) => {
     if (!name) return handleResponse(resp, 404, "Category name is required")
 
     // Check if category exists
-    const checkQuery = `SELECT id FROM ${process.env.CATEGORY_TABLE} WHERE name = '${name}'`;
+    const checkQuery = `SELECT id FROM ${process.env.CATEGORY_TABLE} WHERE name = '${name}' and user_id='${req.user.id}'`;
     Category.query(checkQuery, (error, results) => {
         if (error) return handleError(resp, error)
 
@@ -84,8 +90,9 @@ Routes.post('/createCategory', checkUserDetails, (req, resp) => {
         });
     });
 });
+
 Routes.get('/getAllCategories', checkUserDetails, (req, resp) => {
-    const Query = `SELECT * FROM ${process.env.CATEGORY_TABLE} where user_id=?  ORDER BY id DESC` ;
+    const Query = `SELECT * FROM ${process.env.CATEGORY_TABLE} where user_id=? ` ;
 
     Category.query(Query, [req.user.id], (error, results) => {
         if (error) return handleError(resp, error)
@@ -94,5 +101,25 @@ Routes.get('/getAllCategories', checkUserDetails, (req, resp) => {
 });
 
 
+
+Routes.post("/addMenus",checkUserDetails,upload.none(),(req,resp)=>{ //upload.none() jb koi img upload na krani ho
+    const { itemname, price, category,description} = req.body;   //item ki image save krani hogi to usko test krne ke lie body ke andr form-data lenge raw nhi
+     
+    if (!itemname || !price || !category) return handleResponse(resp,404,"All fields are require")
+     
+     const categoryQuery=`Select id from ${process.env.CATEGORY_TABLE} where name='${category}'`  //category ki id search krne ke lie
+     Category.query(categoryQuery,(error,results)=>{
+         if(error) return handleError(resp,error)
+         if(results.length===0) return handleResponse(resp,404,"This category not exists in your category list")
+        //  resp.send(results[0]);
+         const category_id=results[0].id
+ 
+         const insertQuery=`INSERT INTO ${process.env.MENU_TABLE} (itemname, price, category_id, description) VALUES (?, ?, ?, ?)`
+         Menu.query(insertQuery,[itemname,price,category_id,description],(error,result)=>{
+             if(error) return handleError(resp,error)
+             return handleResponse(resp,201,"Menu created Successfully",result)
+         })  
+     })
+ })
 
 module.exports = Routes    

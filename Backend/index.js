@@ -6,6 +6,7 @@ require("dotenv").config()
 const app=express()
 app.use(cors())
 app.use(express.json())
+app.use('/uploads', express.static('uploads'));  //files ko upload krne ke lie nd also make a folder of img/files dynamically
 connectDB()
 app.use("/api",Routes)
 
