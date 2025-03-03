@@ -1,6 +1,7 @@
 const express = require("express")
 const multer =require("multer")
 const jwt = require("jsonwebtoken")
+const fs=require("fs") //to create folder/directory ...no need to install
 
 const { handleResponse, handleError } = require("../Responses/Responses")
 const { generateotp, verifyotp } = require("../Services/OtpService/OTPService")
@@ -12,7 +13,25 @@ const Menu =require("../Tables/MenuTable")
 
 const Routes = express.Router()
 require("dotenv").config()
-const upload = multer()
+
+const storage = multer.diskStorage({  //this create a folder 
+    destination: (req, file, cb) => {   //cb =>callback fnc
+        // console.log(file);
+        fs.mkdir("./uploads/",{recursive:true},(err)=>{  //fs make dictorary /folder.....recursive ..if foldr h to existing ko choose krega or usme kam krnge nhi to create new
+            if(err) return cb(err,null)
+            else cb(null, 'uploads/');
+        })
+    },
+    filename: (req, file, cb) => {
+        cb(null, Date.now() + '-' + file.originalname);
+    }
+});
+const upload=multer({storage:storage})
+const deleteImage=(path)=>{
+    fs.unlink(path,(error)=>{
+        console.log("Error Occured in deleting the image:"+error);        
+    })
+}
 
 Routes.get("/", (req, resp) => handleResponse(resp, 200, "Server Health is Okay!"))
 
@@ -102,24 +121,48 @@ Routes.get('/getAllCategories', checkUserDetails, (req, resp) => {
 
 
 
-Routes.post("/addMenus",checkUserDetails,upload.none(),(req,resp)=>{ //upload.none() jb koi img upload na krani ho
+Routes.post("/addMenus",checkUserDetails,upload.single("image"),(req,resp)=>{ //upload.none() 
     const { itemname, price, category,description} = req.body;   //item ki image save krani hogi to usko test krne ke lie body ke andr form-data lenge raw nhi
      
-    if (!itemname || !price || !category) return handleResponse(resp,404,"All fields are require")
+    if (!itemname || !price || !category)  {
+            if(req.file) deleteImage("./uploads/"+req.file.filename) 
+            return handleResponse(resp,404,"All fields are require")
+        }
+
+    if(!req.file) return handleResponse(resp,404,"Plz upload the image")
      
      const categoryQuery=`Select id from ${process.env.CATEGORY_TABLE} where name='${category}'`  //category ki id search krne ke lie
      Category.query(categoryQuery,(error,results)=>{
-         if(error) return handleError(resp,error)
-         if(results.length===0) return handleResponse(resp,404,"This category not exists in your category list")
-        //  resp.send(results[0]);
-         const category_id=results[0].id
+        if(error){
+            deleteImage("./uploads/"+req.file.filename)
+            return handleError(resp,error)
+        } 
+        if(results.length===0) {
+            deleteImage("./uploads/"+req.file.filename)
+            return handleResponse(resp,404,"This category not exists in your category list")
+        }
+        
+        const category_id=results[0].id
  
-         const insertQuery=`INSERT INTO ${process.env.MENU_TABLE} (itemname, price, category_id, description) VALUES (?, ?, ?, ?)`
-         Menu.query(insertQuery,[itemname,price,category_id,description],(error,result)=>{
-             if(error) return handleError(resp,error)
-             return handleResponse(resp,201,"Menu created Successfully",result)
+         const insertQuery=`INSERT INTO ${process.env.MENU_TABLE} (itemname, price, category_id, description, image) VALUES (?, ?, ?, ?, ?)`
+         Menu.query(insertQuery,[itemname,price,category_id,description,"./uploads/"+req.file.filename],(error,result)=>{
+            if(error) {
+                deleteImage("./uploads/"+req.file.filename)
+                return handleError(resp,error)
+            }
+            return handleResponse(resp,201,"Menu created Successfully",result)
          })  
      })
  })
+
+ Routes.get('/getAllItems',checkUserDetails,(req, resp) => {
+    const query=`SELECT menu_items.id, menu_items.itemname, menu_items.image, menu_items.price, menu_items.description, menu_items.category_id,categories.name AS category_name FROM menu_items JOIN categories ON menu_items.category_id = categories.id ORDER BY menu_items.id ASC`
+   
+    Menu.query(query, (error, results) => {
+        if (error) return handleError(resp,error);
+        if(results.length===0) return handleResponse(resp,400,"Table is empty")
+        return handleResponse(resp,202,"Fetched successfully",results)
+    });
+});
 
 module.exports = Routes    
