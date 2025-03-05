@@ -29,7 +29,7 @@ const storage = multer.diskStorage({  //this create a folder
 const upload=multer({storage:storage})
 const deleteImage=(path)=>{
     fs.unlink(path,(error)=>{
-        console.log("Error Occured in deleting the image:"+error);        
+      if (error)  console.log("Error Occured in deleting the image:"+error);        
     })
 }
 
@@ -119,6 +119,7 @@ Routes.get('/getAllCategories', checkUserDetails, (req, resp) => {
     });
 });
 
+
 Routes.post("/addMenus",checkUserDetails,upload.single("image"),(req,resp)=>{ //upload.none() 
     const { itemname, price, category,description} = req.body;   //item ki image save krani hogi to usko test krne ke lie body ke andr form-data lenge raw nhi
      
@@ -184,6 +185,100 @@ Routes.get('/getAllItem/:category',checkUserDetails,(req, resp) => {
     })
 });
 
+Routes.delete('/deleteItem/:id',checkUserDetails,(req, resp) => {
+    const { id } = req.params;
+    if (isNaN(id)) return handleResponse(resp,404,"Invalid Menu Id")
 
+    Menu.query(`SELECT image FROM ${process.env.MENU_TABLE} WHERE id = ?`, [id], (error, results) => {
+        if (error) return handleError(resp,error)
+        if (results.length === 0) return handleResponse(resp,400,"Menu not found in the list")
+
+        if (results[0] && results[0].image) {
+            deleteImage(results[0].image)
+
+            const query = `DELETE FROM ${process.env.MENU_TABLE} WHERE id = ?`;
+            Menu.query(query, [id], (error, result) => {
+                if (error) return handleError(resp,error)
+                // if (result.affectedRows === 0) return resp.status(404).json({ message: 'Menu item not found' });
+                
+                return handleResponse(resp,202,"Menu deleted successfully")
+            });
+        }
+    });
+});
+
+Routes.put('/updateItem/:id',checkUserDetails, (req, resp) => {       //update text fields
+    const { id } = req.params;
+    const { itemname, price, category, description } = req.body;
+
+    if (isNaN(id)) return handleResponse(resp,404,"Invalid Menu Id")   //chck the format of id in sql
+
+
+    if (!itemname || !price || !category) return handleResponse(resp,404,'All fields except image are required');
+    
+
+    const checkQuery = `SELECT id FROM ${process.env.CATEGORY_TABLE} WHERE name = ?`; //category change krne k lie or updated category uthane ke  lie
+    Category.query(checkQuery, [category], (error, results) => {
+        if (error) return handleError(resp,error)
+        if(results.length===0) return handleResponse(resp,404,"This category does not exists")
+
+        const categoryID=results[0].id //updated category id 
+
+
+            Menu.query(`SELECT * FROM ${process.env.MENU_TABLE} WHERE id = ?`, [id], (error, responses) => {  //update krne ke lie item search krnge
+                if (error)  return handleError(resp,error)
+                if (responses.length === 0) return handleResponse(resp,404,"Menu not found in the list")
+
+                const query = `UPDATE ${process.env.MENU_TABLE} SET itemname = ?, price = ?, category_id = ?, description = ? WHERE id = ?`;
+                Menu.query(query, [itemname, price, categoryID, description, id], (error, result) => {
+                    if (error)  return handleError(resp,error)
+                    return handleResponse(resp,202,"Menu updated successfully!")
+                });
+            });
+        })
+});
+
+Routes.put("/updateItemImage/:id",checkUserDetails,upload.single('image'),(req,resp)=>{   //update the image
+    const { id } = req.params;
+
+    if (isNaN(id)) {
+        if (req.file) deleteImage(req?.file?.path)  // image delete bcz id format wrong to error
+        return handleResponse(resp,400,"Invalid Menu id")
+    }
+
+    if (!req.file) {
+        return handleResponse(resp,400,"No image is uploaded yet ..!")
+    }
+
+
+    const newImagePath = `./uploads/${req.file.filename}`;
+   
+    Menu.query(`SELECT image FROM ${process.env.MENU_TABLE} WHERE id = ?`, [id], (error, results) => { //database m vo menu item available h b ya ni check
+            if (error) {
+                deleteImage(newImagePath)  //img upload hogi hogi already
+                return handleError(resp,error)
+            }
+
+            if (results.length === 0) {
+                deleteImage(newImagePath)  //obj khali h to delete krnge
+                return handleResponse(resp,404,"Menu not found in the list")
+            }
+
+            const oldImagePath = results[0]?.image;
+
+            const query = `UPDATE ${process.env.MENU_TABLE} SET image = ? WHERE id = ?`;
+            Menu.query(query, [newImagePath,id], (error, result) => {
+                if (error) {
+                    deleteImage(newImagePath)
+                    return handleError(resp,error)
+                }
+
+                if (oldImagePath && oldImagePath !== newImagePath) {
+                    deleteImage(oldImagePath)
+                }
+                return handleResponse(resp,202,'Menu item image updated successfully');
+        });
+    });
+})
 
 module.exports = Routes    
